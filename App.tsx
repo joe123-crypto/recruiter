@@ -3,25 +3,26 @@ import { AppState, CompanyProfile, CandidateAnalysis } from './types';
 import { Auth } from './components/Auth';
 import { Dashboard } from './components/Dashboard';
 import { PresentationMode } from './components/PresentationMode';
+import { Onboarding } from './components/Onboarding';
 import { getProfile, clearProfile } from './services/storageService';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState>(AppState.AUTH);
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [company, setCompany] = useState<CompanyProfile | null>(getProfile());
+  const [appState, setAppState] = useState<AppState>(() => {
+    const profile = getProfile();
+    if (!profile) return AppState.AUTH;
+    return profile.imapPassword ? AppState.DASHBOARD : AppState.ONBOARDING;
+  });
   const [presentationCandidates, setPresentationCandidates] = useState<CandidateAnalysis[]>([]);
-
-  // Check for existing session on mount
-  useEffect(() => {
-    const storedProfile = getProfile();
-    if (storedProfile) {
-      setCompany(storedProfile);
-      setAppState(AppState.DASHBOARD);
-    }
-  }, []);
 
   const handleLogin = (profile: CompanyProfile) => {
     setCompany(profile);
-    setAppState(AppState.DASHBOARD);
+    if (profile.imapPassword) {
+      setAppState(AppState.DASHBOARD);
+    } else {
+      setAppState(AppState.ONBOARDING);
+    }
   };
 
   const handleLogout = () => {
@@ -41,30 +42,50 @@ export default function App() {
 
   const handleUpdateCompany = (updated: CompanyProfile) => {
     setCompany(updated);
+    // If they updated and added password, go to dashboard
+    if (updated.imapPassword) {
+      setAppState(AppState.DASHBOARD);
+    }
   };
 
+  const handleOnboardingComplete = (updatedProfile: CompanyProfile) => {
+    setCompany(updatedProfile);
+    setAppState(AppState.DASHBOARD);
+  };
+
+  const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans">
-      {appState === AppState.AUTH && (
-        <Auth onLogin={handleLogin} />
-      )}
+    <GoogleOAuthProvider clientId={clientId}>
+      <div className="min-h-screen font-sans">
+        {appState === AppState.AUTH && (
+          <Auth onLogin={handleLogin} />
+        )}
 
-      {appState === AppState.DASHBOARD && company && (
-        <Dashboard 
-          company={company} 
-          onStartPresentation={handleStartPresentation}
-          onLogout={handleLogout}
-          onUpdateCompany={handleUpdateCompany}
-        />
-      )}
+        {appState === AppState.ONBOARDING && company && (
+          <Onboarding
+            company={company}
+            onComplete={handleOnboardingComplete}
+          />
+        )}
 
-      {appState === AppState.PRESENTATION && company && (
-        <PresentationMode 
-          candidates={presentationCandidates}
-          company={company}
-          onClose={handleClosePresentation}
-        />
-      )}
-    </div>
+        {appState === AppState.DASHBOARD && company && (
+          <Dashboard
+            company={company}
+            onStartPresentation={handleStartPresentation}
+            onLogout={handleLogout}
+            onUpdateCompany={handleUpdateCompany}
+          />
+        )}
+
+        {appState === AppState.PRESENTATION && company && (
+          <PresentationMode
+            candidates={presentationCandidates}
+            company={company}
+            onClose={handleClosePresentation}
+          />
+        )}
+      </div>
+    </GoogleOAuthProvider>
   );
 }

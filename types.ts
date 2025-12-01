@@ -3,6 +3,9 @@ export interface CompanyProfile {
   location: string;
   email: string;
   industry: string;
+  imapUser?: string;
+  imapHost?: string;
+  imapPassword?: string;
 }
 
 export interface JobCriteria {
@@ -36,6 +39,7 @@ export interface CandidateAnalysis {
 
 export enum AppState {
   AUTH = 'AUTH',
+  ONBOARDING = 'ONBOARDING',
   DASHBOARD = 'DASHBOARD',
   PRESENTATION = 'PRESENTATION'
 }
