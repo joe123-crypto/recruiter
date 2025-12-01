@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      // Proxy for local development only
+      // In production (Vercel), /api routes are handled by serverless functions
       proxy: {
         '/api': 'http://localhost:3001'
       }
