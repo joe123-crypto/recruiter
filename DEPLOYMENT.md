@@ -14,15 +14,20 @@ This application is configured for deployment on Vercel with serverless function
 
 Configure these in your Vercel project settings (Settings → Environment Variables):
 
-| Variable | Description | Where to Get It |
-|----------|-------------|-----------------|
-| `VITE_GEMINI_API_KEY` | Google Gemini API key for AI analysis | [Google AI Studio](https://makersuite.google.com/app/apikey) |
-| `VITE_GOOGLE_CLIENT_ID` | Google OAuth Client ID for sign-in | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) |
+| Variable | Description | Where to Get It | Notes |
+|----------|-------------|-----------------|-------|
+| `VITE_GEMINI_API_KEY` | Google Gemini API key (frontend) | [Google AI Studio](https://makersuite.google.com/app/apikey) | Used by client-side code |
+| `GEMINI_API_KEY` | Google Gemini API key (backend) | Same as above | Used by serverless function |
+| `VITE_GOOGLE_CLIENT_ID` | Google OAuth Client ID | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | For sign-in |
+
+> **💡 Tip**: Use the same API key value for both `VITE_GEMINI_API_KEY` and `GEMINI_API_KEY`. The `VITE_` prefix is only needed for Vite to expose it to the browser.
 
 **Optional** (if you want server-side defaults for IMAP scanning):
 - `IMAP_USER` - Default email for scanning
 - `IMAP_PASSWORD` - Default app password
 - `IMAP_HOST` - Default IMAP host (e.g., `imap.gmail.com`)
+
+> **💡 Tip**: See [.env.example](file:///c:/Users/Joe/OneDrive/Documents/workspace/Recruiter/.env.example) for a complete template of all environment variables.
 
 ### Deployment Steps
 

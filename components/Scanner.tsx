@@ -29,6 +29,11 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
         deadline: ''
     });
 
+    const [emailFilters, setEmailFilters] = useState({
+        subject: '',
+        sender: ''
+    });
+
     const [sendSummaryEmail, setSendSummaryEmail] = useState(false);
 
     const handleOpenSetup = () => {
@@ -101,7 +106,8 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                 host: company.imapHost || 'imap.gmail.com'
             } : undefined;
 
-            const result = await scanForCandidates(company.industry, jobCriteria, emailCredentials, sendSummaryEmail);
+            // Pass emailFilters to the service
+            const result = await scanForCandidates(company.industry, jobCriteria, emailCredentials, sendSummaryEmail, emailFilters);
 
             if (result && result.candidates) {
                 setCandidates(result.candidates);
@@ -224,6 +230,33 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                                     </div>
                                 </div>
                             )}
+                        </div>
+
+                        {/* Email Filters Section */}
+                        <div className="px-6 pb-6 space-y-4">
+                            <h4 className="text-sm font-medium text-slate-400 uppercase tracking-wider">Email Search Filters</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-slate-500 block mb-1">Subject Contains</label>
+                                    <input
+                                        type="text"
+                                        value={emailFilters.subject}
+                                        onChange={(e) => setEmailFilters(prev => ({ ...prev, subject: e.target.value }))}
+                                        placeholder="e.g. Application, Resume"
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-600"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-500 block mb-1">Sender / From</label>
+                                    <input
+                                        type="text"
+                                        value={emailFilters.sender}
+                                        onChange={(e) => setEmailFilters(prev => ({ ...prev, sender: e.target.value }))}
+                                        placeholder="e.g. linkedin.com"
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-blue-500 outline-none placeholder:text-slate-600"
+                                    />
+                                </div>
+                            </div>
                         </div>
 
                         <div className="px-6 py-4 bg-slate-800/30 border-t border-slate-800 flex items-center justify-between shrink-0">

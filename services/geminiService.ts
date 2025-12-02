@@ -8,7 +8,8 @@ export const scanForCandidates = async (
   industry: string,
   jobCriteria: JobCriteria,
   emailCredentials?: { user: string; pass: string; host: string },
-  sendSummaryEmail: boolean = false
+  sendSummaryEmail: boolean = false,
+  emailFilters?: { subject: string; sender: string }
 ): Promise<{ candidates: CandidateAnalysis[], scannedCount: number }> => {
   try {
     const response = await fetch('/api/scan', {
@@ -20,12 +21,15 @@ export const scanForCandidates = async (
         companyIndustry: industry,
         jobCriteria,
         emailCredentials,
-        sendSummaryEmail
+        sendSummaryEmail,
+        emailFilters
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Scan failed: ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.details || errorData.error || response.statusText;
+      throw new Error(`Scan failed: ${errorMessage}`);
     }
 
     const data = await response.json();
