@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import scanHandler from './pages/api/scan.js';
+import scanHandler from './api/scan.js';
 
 dotenv.config();
 
