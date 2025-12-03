@@ -80,7 +80,7 @@ async function analyzeEmail(emailSubject, emailBody, resumeText, jobCriteria) {
   }
 }
 
-import { sendSummaryEmail } from '../../utils/emailSender.js';
+import { sendSummaryEmail } from '../utils/emailSender.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
