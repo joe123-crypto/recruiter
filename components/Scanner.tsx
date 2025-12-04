@@ -1,20 +1,30 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CompanyProfile, AgentStatus, CandidateAnalysis, EmailData, JobCriteria } from '../types';
 import { scanForCandidates, extractJobCriteriaFromDoc } from '../services/geminiService';
 import { CandidateCard } from './CandidateCard';
-import { Play, Square, RefreshCw, BarChart3, Mail, Loader2, FileText, CheckCircle, X, UploadCloud, Trash2 } from 'lucide-react';
+import { ChatInterface } from './ChatInterface';
+import { Play, Square, RefreshCw, BarChart3, Mail, Loader2, FileText, CheckCircle, X, UploadCloud, Trash2, PlayCircle, MessageSquare } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 
 interface Props {
     company: CompanyProfile;
     onStartPresentation: (candidates: CandidateAnalysis[]) => void;
+    initialState?: any; // Allow passing state from history
 }
 
-export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
+export const Scanner: React.FC<Props> = ({ company, onStartPresentation, initialState }) => {
     const [status, setStatus] = useState<AgentStatus>(AgentStatus.IDLE);
     const [emails, setEmails] = useState<EmailData[]>([]);
     const [candidates, setCandidates] = useState<CandidateAnalysis[]>([]);
     const [selectedCandidate, setSelectedCandidate] = useState<CandidateAnalysis | null>(null);
+
+    // Streaming & Resume State
+    const [scanStatusMessage, setScanStatusMessage] = useState<string>('');
+    const [lastScannedUid, setLastScannedUid] = useState<number | undefined>(undefined);
+    const [scanProgress, setScanProgress] = useState<{ current: number, total: number } | null>(null);
+
+    // Chat State
+    const [showChat, setShowChat] = useState(false);
 
     // Setup Modal State
     const [showSetup, setShowSetup] = useState(false);
@@ -36,12 +46,91 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
 
     const [sendSummaryEmail, setSendSummaryEmail] = useState(false);
 
+    // Load initial state if provided (from Recent Scans)
+    useEffect(() => {
+        if (initialState) {
+            setCandidates(initialState.candidates || []);
+            setJobCriteria(initialState.jobCriteria || {});
+            setLastScannedUid(initialState.lastScannedUid);
+            setStatus(AgentStatus.COMPLETE);
+            setScanStatusMessage('Loaded from history.');
+            // Clear current session to avoid conflict? Or maybe set it to this?
+            // For now, we just load it.
+        } else {
+            // Try to restore from current session
+            const savedSession = localStorage.getItem('recruiter_current_session');
+            if (savedSession) {
+                try {
+                    const session = JSON.parse(savedSession);
+                    setCandidates(session.candidates || []);
+                    setJobCriteria(session.jobCriteria || {});
+                    setLastScannedUid(session.lastScannedUid);
+                    setEmailFilters(session.emailFilters || { subject: '', sender: '' });
+
+                    // Restore status logic
+                    if (session.status === AgentStatus.SCANNING) {
+                        setStatus(AgentStatus.IDLE); // Don't auto-resume scanning, let user decide
+                        setScanStatusMessage('Previous scan interrupted. Ready to resume.');
+                    } else {
+                        setStatus(session.status || AgentStatus.IDLE);
+                    }
+                } catch (e) {
+                    console.error("Failed to restore session", e);
+                }
+            }
+        }
+    }, [initialState]);
+
+    // Persist State
+    useEffect(() => {
+        // Don't save if we are just loading
+        if (status === AgentStatus.IDLE && candidates.length === 0) return;
+
+        const sessionState = {
+            candidates,
+            jobCriteria,
+            lastScannedUid,
+            emailFilters,
+            status
+        };
+        localStorage.setItem('recruiter_current_session', JSON.stringify(sessionState));
+    }, [candidates, jobCriteria, lastScannedUid, emailFilters, status]);
+
+    // Save to History on Completion
+    useEffect(() => {
+        if (status === AgentStatus.COMPLETE && candidates.length > 0) {
+            const historyItem = {
+                id: Date.now().toString(),
+                timestamp: Date.now(),
+                jobCriteria,
+                candidates,
+                lastScannedUid
+            };
+
+            const existingHistory = localStorage.getItem('recruiter_scan_history');
+            let history = existingHistory ? JSON.parse(existingHistory) : [];
+
+            // Check if we already saved this exact scan (simple check by candidate count/title to avoid dupes on re-render)
+            // A better way is to have a scanId. For now, we'll just append.
+            // Actually, let's avoid dupes by checking if the last item has same timestamp (unlikely) or same candidates/title
+            // Let's just append for now, user can delete.
+
+            // Wait, this effect runs on every render if status is complete. We need a ref to track if saved.
+        }
+    }, [status]);
+    // ^ The above effect is problematic. Let's move history saving to the executeScan completion block.
+
     const handleOpenSetup = () => {
         // If we have completed a run, reset data before new run
         if (status === AgentStatus.COMPLETE) {
             setCandidates([]);
             setEmails([]);
             setSelectedCandidate(null);
+            setLastScannedUid(undefined);
+            setScanProgress(null);
+            setShowChat(false);
+            // Clear session storage
+            localStorage.removeItem('recruiter_current_session');
         }
         setShowSetup(true);
     };
@@ -93,11 +182,16 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-    const executeScan = async () => {
+    const executeScan = async (isResume: boolean = false) => {
         setShowSetup(false);
-        setStatus(AgentStatus.GENERATING_EMAILS);
-        setCandidates([]);
-        setSelectedCandidate(null);
+        setStatus(AgentStatus.SCANNING); // Use SCANNING for the streaming phase
+
+        if (!isResume) {
+            setCandidates([]);
+            setSelectedCandidate(null);
+            setLastScannedUid(undefined);
+            setShowChat(false);
+        }
 
         try {
             const emailCredentials = (company.imapUser || company.email) && company.imapPassword ? {
@@ -107,21 +201,76 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
             } : undefined;
 
             // Pass emailFilters to the service
-            const result = await scanForCandidates(company.industry, jobCriteria, emailCredentials, sendSummaryEmail, emailFilters);
-
-            if (result && result.candidates) {
-                setCandidates(result.candidates);
-            }
+            await scanForCandidates(
+                company.industry,
+                jobCriteria,
+                emailCredentials,
+                sendSummaryEmail,
+                emailFilters,
+                isResume ? lastScannedUid : undefined,
+                (newCandidate) => {
+                    setCandidates(prev => [...prev, newCandidate]);
+                },
+                (statusMsg) => {
+                    setScanStatusMessage(statusMsg);
+                },
+                (current, total) => {
+                    setScanProgress({ current, total });
+                },
+                (uid) => {
+                    setLastScannedUid(uid);
+                }
+            );
 
             setStatus(AgentStatus.COMPLETE);
+            setScanStatusMessage('Scan complete.');
+            setShowChat(true); // Auto-open chat when complete
+
+            // Save to History
+            const historyItem = {
+                id: Date.now().toString(),
+                timestamp: Date.now(),
+                jobCriteria,
+                candidates: candidates, // Note: candidates state might not be updated yet in this closure? 
+                // Actually, candidates state in this closure is stale. We need to use the functional update or a ref.
+                // But wait, scanForCandidates awaits until done. 
+                // However, the `candidates` variable here is from the render scope when executeScan was called.
+                // We need to use a ref to track candidates for saving.
+            };
+
+            // Let's use a workaround: We'll save to history in a useEffect that watches status=COMPLETE, 
+            // but we need to ensure it only runs once per scan.
+            // Or better, we can just read the current session from localStorage which is up to date!
+
+            setTimeout(() => {
+                const session = localStorage.getItem('recruiter_current_session');
+                if (session) {
+                    const parsed = JSON.parse(session);
+                    const item = {
+                        id: Date.now().toString(),
+                        timestamp: Date.now(),
+                        jobCriteria: parsed.jobCriteria,
+                        candidates: parsed.candidates,
+                        lastScannedUid: parsed.lastScannedUid
+                    };
+
+                    const existingHistory = localStorage.getItem('recruiter_scan_history');
+                    const history = existingHistory ? JSON.parse(existingHistory) : [];
+                    history.push(item);
+                    localStorage.setItem('recruiter_scan_history', JSON.stringify(history));
+                }
+            }, 1000); // Small delay to ensure localStorage is updated
+
         } catch (error) {
             console.error(error);
-            setStatus(AgentStatus.IDLE);
+            setStatus(AgentStatus.IDLE); // Or ERROR state if we had one
+            setScanStatusMessage('Scan failed or stopped.');
         }
     };
 
     const handleStopAgent = () => {
         setStatus(AgentStatus.IDLE);
+        setScanStatusMessage('Stopped by user.');
     };
 
     const isWorking = status !== AgentStatus.IDLE && status !== AgentStatus.COMPLETE;
@@ -134,6 +283,25 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
 
     return (
         <div className="flex flex-col h-full bg-slate-900/50 relative">
+            {/* Chat Interface */}
+            {showChat && (
+                <ChatInterface
+                    candidates={candidates}
+                    jobCriteria={jobCriteria}
+                    onClose={() => setShowChat(false)}
+                />
+            )}
+
+            {/* Floating Chat Button (when closed but available) */}
+            {!showChat && status === AgentStatus.COMPLETE && candidates.length > 0 && (
+                <button
+                    onClick={() => setShowChat(true)}
+                    className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg shadow-blue-600/30 flex items-center justify-center z-40 transition-transform hover:scale-110 animate-bounce-in"
+                >
+                    <MessageSquare size={24} />
+                </button>
+            )}
+
             {/* Job Setup Modal */}
             {showSetup && (
                 <div className="absolute inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -280,7 +448,7 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={executeScan}
+                                    onClick={() => executeScan(false)}
                                     disabled={!uploadedFile || isParsingDoc}
                                     className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-semibold shadow-lg shadow-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                 >
@@ -297,6 +465,14 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                 <h2 className="text-lg font-medium text-white">Recruitment Agent Console</h2>
 
                 <div className="flex items-center gap-3">
+                    {/* Status Message Display */}
+                    {isWorking && (
+                        <div className="flex items-center gap-3 mr-4 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700/50">
+                            <Loader2 size={14} className="animate-spin text-blue-400" />
+                            <span className="text-xs font-medium text-slate-300">{scanStatusMessage || 'Processing...'}</span>
+                        </div>
+                    )}
+
                     {status === AgentStatus.COMPLETE && candidates.length > 0 && (
                         <button
                             onClick={() => onStartPresentation(candidates)}
@@ -314,13 +490,25 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                             <Square size={16} fill="currentColor" /> Stop Agent
                         </button>
                     ) : (
-                        <button
-                            onClick={handleOpenSetup}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20"
-                        >
-                            {status === AgentStatus.COMPLETE ? <RefreshCw size={16} /> : <Play size={16} />}
-                            {status === AgentStatus.COMPLETE ? 'New Scan' : 'Start Scan'}
-                        </button>
+                        <div className="flex gap-2">
+                            {/* Resume Button */}
+                            {lastScannedUid !== undefined && candidates.length > 0 && (
+                                <button
+                                    onClick={() => executeScan(true)}
+                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600/10 text-emerald-400 border border-emerald-600/20 hover:bg-emerald-600/20 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    <PlayCircle size={16} /> Resume Scan
+                                </button>
+                            )}
+
+                            <button
+                                onClick={handleOpenSetup}
+                                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20"
+                            >
+                                {status === AgentStatus.COMPLETE ? <RefreshCw size={16} /> : <Play size={16} />}
+                                {status === AgentStatus.COMPLETE ? 'New Scan' : 'Start Scan'}
+                            </button>
+                        </div>
                     )}
                 </div>
             </div>
@@ -347,124 +535,166 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation }) => {
                         </div>
                     )}
 
-                    {/* Loading State */}
+                    {/* Loading State - Initial connection */}
                     {status === AgentStatus.GENERATING_EMAILS && (
                         <div className="h-full flex flex-col items-center justify-center">
                             <Loader2 className="w-16 h-16 text-blue-500 animate-spin mb-6" />
-                            <h3 className="text-xl font-medium text-white">Ingesting Emails...</h3>
-                            <p className="text-slate-400">Scanning inbox for "{jobCriteria.jobTitle}" applications</p>
+                            <h3 className="text-xl font-medium text-white">Connecting...</h3>
+                            <p className="text-slate-400">Establishing secure connection to email gateway</p>
                         </div>
                     )}
 
                     {/* Results Grid */}
-                    {(candidates.length > 0 || status === AgentStatus.ANALYZING) && (
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full min-h-[500px]">
+                    {(candidates.length > 0 || status === AgentStatus.SCANNING) && (
+                        <>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full min-h-[500px]">
 
-                            {/* List */}
-                            <div className="lg:col-span-1 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2 h-full max-h-[calc(100vh-140px)]">
-                                {candidates.map((c) => (
-                                    <CandidateCard
-                                        key={c.id}
-                                        candidate={c}
-                                        onClick={() => setSelectedCandidate(c)}
-                                    />
-                                ))}
-                                {status === AgentStatus.ANALYZING && (
-                                    <div className="glass-panel p-4 rounded-xl border border-slate-700 animate-pulse flex items-center justify-center h-32 shrink-0">
-                                        <div className="flex flex-col items-center gap-2">
-                                            <Loader2 className="animate-spin text-blue-400" />
-                                            <span className="text-sm text-slate-400">Analyzing next email...</span>
+                                {/* List */}
+                                <div className="lg:col-span-1 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2 h-full max-h-[calc(100vh-140px)]">
+                                    {candidates.map((c) => (
+                                        <CandidateCard
+                                            key={c.id}
+                                            candidate={c}
+                                            onClick={() => setSelectedCandidate(c)}
+                                        />
+                                    ))}
+                                    {status === AgentStatus.SCANNING && (
+                                        <div className="glass-panel p-4 rounded-xl border border-slate-700 animate-pulse flex items-center justify-center h-32 shrink-0">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <Loader2 className="animate-spin text-blue-400" />
+                                                <span className="text-sm text-slate-400">
+                                                    {scanProgress ? `Scanning ${scanProgress.current}/${scanProgress.total}` : 'Scanning...'}
+                                                </span>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Detail & Chart */}
-                            <div className="lg:col-span-2 flex flex-col gap-6 h-full overflow-y-auto pr-2 custom-scrollbar">
-                                {/* Stats */}
-                                <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 h-64 shrink-0">
-                                    <h3 className="text-sm font-semibold text-slate-400 mb-4 uppercase tracking-wider">Score Distribution</h3>
-                                    <div className="w-full h-full pb-6">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={chartData}>
-                                                <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
-                                                <YAxis stroke="#64748b" tick={{ fontSize: 12 }} domain={[0, 100]} />
-                                                <Tooltip
-                                                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
-                                                    itemStyle={{ color: '#60a5fa' }}
-                                                    cursor={{ fill: '#334155', opacity: 0.2 }}
-                                                />
-                                                <Bar dataKey="score" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </div>
+                                    )}
                                 </div>
 
-                                {/* Selected Details */}
-                                {selectedCandidate ? (
-                                    <div className="bg-slate-800/50 rounded-xl p-8 border border-slate-700">
-                                        <div className="flex justify-between items-start mb-6">
-                                            <div>
-                                                <h2 className="text-2xl font-bold text-white">{selectedCandidate.name}</h2>
-                                                <p className="text-blue-400 text-lg">{selectedCandidate.role}</p>
-                                                <p className="text-slate-500 text-sm">{selectedCandidate.email}</p>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-4xl font-bold text-white">{selectedCandidate.score}</div>
-                                                <div className="text-slate-400 text-sm">Match Score</div>
-                                            </div>
+                                {/* Detail & Chart */}
+                                <div className="lg:col-span-2 flex flex-col gap-6 h-full overflow-y-auto pr-2 custom-scrollbar">
+                                    {/* Stats */}
+                                    <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700 h-64 shrink-0">
+                                        <h3 className="text-sm font-semibold text-slate-400 mb-4 uppercase tracking-wider">Score Distribution</h3>
+                                        <div className="w-full h-full pb-6">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={chartData}>
+                                                    <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
+                                                    <YAxis stroke="#64748b" tick={{ fontSize: 12 }} domain={[0, 100]} />
+                                                    <Tooltip
+                                                        contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
+                                                        itemStyle={{ color: '#60a5fa' }}
+                                                        cursor={{ fill: '#334155', opacity: 0.2 }}
+                                                    />
+                                                    <Bar dataKey="score" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
                                         </div>
+                                    </div>
 
-                                        <div className="space-y-6">
-                                            <div>
-                                                <h4 className="text-sm font-semibold text-slate-300 mb-2 uppercase flex items-center gap-2">
-                                                    <FileText size={16} /> AI Summary
-                                                </h4>
-                                                <p className="text-slate-300 leading-relaxed bg-slate-900/50 p-4 rounded-lg border border-slate-700">
-                                                    {selectedCandidate.summary}
-                                                </p>
-                                            </div>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Selected Details */}
+                                    {selectedCandidate ? (
+                                        <div className="bg-slate-800/50 rounded-xl p-8 border border-slate-700">
+                                            <div className="flex justify-between items-start mb-6">
                                                 <div>
-                                                    <h4 className="text-sm font-semibold text-green-400 mb-2 uppercase">Strengths</h4>
-                                                    <ul className="space-y-2">
-                                                        {selectedCandidate.strengths.map((s, i) => (
-                                                            <li key={i} className="flex items-start gap-2 text-slate-300 text-sm">
-                                                                <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
-                                                                {s}
-                                                            </li>
-                                                        ))}
-                                                    </ul>
+                                                    <h2 className="text-2xl font-bold text-white">{selectedCandidate.name}</h2>
+                                                    <p className="text-blue-400 text-lg">{selectedCandidate.role}</p>
+                                                    <p className="text-slate-500 text-sm">{selectedCandidate.email}</p>
                                                 </div>
-                                                <div>
-                                                    <h4 className="text-sm font-semibold text-orange-400 mb-2 uppercase">Weaknesses</h4>
-                                                    <ul className="space-y-2">
-                                                        {selectedCandidate.weaknesses.map((w, i) => (
-                                                            <li key={i} className="flex items-start gap-2 text-slate-300 text-sm">
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 shrink-0" />
-                                                                {w}
-                                                            </li>
-                                                        ))}
-                                                    </ul>
+                                                <div className="text-right">
+                                                    <div className="text-4xl font-bold text-white">{selectedCandidate.score}</div>
+                                                    <div className="text-slate-400 text-sm">Match Score</div>
                                                 </div>
                                             </div>
 
-                                            <div className="pt-4 border-t border-slate-700">
-                                                <h4 className="text-sm font-semibold text-purple-400 mb-2 uppercase">Recommendation Logic</h4>
-                                                <p className="text-slate-400 italic text-sm">
-                                                    "{selectedCandidate.recommendationReason}"
-                                                </p>
+                                            <div className="space-y-6">
+                                                <div>
+                                                    <h4 className="text-sm font-semibold text-slate-300 mb-2 uppercase flex items-center gap-2">
+                                                        <FileText size={16} /> AI Summary
+                                                    </h4>
+                                                    <p className="text-slate-300 leading-relaxed bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                                                        {selectedCandidate.summary}
+                                                    </p>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <h4 className="text-sm font-semibold text-green-400 mb-2 uppercase">Strengths</h4>
+                                                        <ul className="space-y-2">
+                                                            {selectedCandidate.strengths.map((s, i) => (
+                                                                <li key={i} className="flex items-start gap-2 text-slate-300 text-sm">
+                                                                    <CheckCircle size={16} className="text-green-500 mt-0.5 shrink-0" />
+                                                                    {s}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-semibold text-orange-400 mb-2 uppercase">Weaknesses</h4>
+                                                        <ul className="space-y-2">
+                                                            {selectedCandidate.weaknesses.map((w, i) => (
+                                                                <li key={i} className="flex items-start gap-2 text-slate-300 text-sm">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-1.5 shrink-0" />
+                                                                    {w}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                </div>
+
+                                                <div className="pt-4 border-t border-slate-700">
+                                                    <h4 className="text-sm font-semibold text-purple-400 mb-2 uppercase">Recommendation Logic</h4>
+                                                    <p className="text-slate-400 italic text-sm">
+                                                        "{selectedCandidate.recommendationReason}"
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <div className="p-12 text-center text-slate-500 border border-slate-700/50 border-dashed rounded-xl bg-slate-800/30">
-                                        Select a candidate to view full AI analysis
-                                    </div>
-                                )}
+                                    ) : (
+                                        <div className="p-12 text-center text-slate-500 border border-slate-700/50 border-dashed rounded-xl bg-slate-800/30">
+                                            Select a candidate to view full AI analysis
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+
+                            {/* Findings Table */}
+                            <div className="mt-6 bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden shrink-0">
+                                <div className="p-4 border-b border-slate-700">
+                                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Findings Summary</h3>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-sm text-slate-400">
+                                        <thead className="bg-slate-900/50 text-xs uppercase font-medium text-slate-300">
+                                            <tr>
+                                                <th className="px-6 py-3">Candidate</th>
+                                                <th className="px-6 py-3">Role</th>
+                                                <th className="px-6 py-3">Score</th>
+                                                <th className="px-6 py-3">Status</th>
+                                                <th className="px-6 py-3">Email</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-700">
+                                            {candidates.map((candidate) => (
+                                                <tr key={candidate.id} className="hover:bg-slate-700/30 transition-colors cursor-pointer" onClick={() => setSelectedCandidate(candidate)}>
+                                                    <td className="px-6 py-4 font-medium text-white">{candidate.name}</td>
+                                                    <td className="px-6 py-4">{candidate.role}</td>
+                                                    <td className="px-6 py-4">
+                                                        <span className={`px-2 py-1 rounded text-xs font-medium ${candidate.score >= 80 ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                                                            candidate.score >= 60 ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
+                                                                'bg-red-500/10 text-red-400 border border-red-500/20'
+                                                            }`}>
+                                                            {candidate.score}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 capitalize">{candidate.status}</td>
+                                                    <td className="px-6 py-4">{candidate.email}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
                     )}
                 </div>
             </div>

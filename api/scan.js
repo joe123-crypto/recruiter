@@ -58,6 +58,12 @@ async function analyzeEmail(emailSubject, emailBody, resumeText, jobCriteria) {
 
     Extract the candidate's name, email, and role from BOTH the email and resume (if available).
     Evaluate them and provide a score (0-100), summary, strengths, weaknesses, and a recommendation status (interview, pending, rejected).
+
+    CRITICAL SCORING RULE:
+    - If the email/resume is NOT related to the job position (e.g., spam, newsletter, marketing, or a completely different job inquiry), the score MUST be 0.
+    - Do not give "mock" or "partial" credit for off-topic emails.
+    - If it is a valid application but poor fit, score accordingly (low but non-zero).
+
     Return JSON only.
   `;
 
@@ -87,7 +93,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { companyIndustry, jobCriteria, emailCredentials, sendSummaryEmail: shouldSendEmail, managerEmail, emailFilters } = req.body;
+  const { companyIndustry, jobCriteria, emailCredentials, sendSummaryEmail: shouldSendEmail, managerEmail, emailFilters, lastScannedUid } = req.body;
+
+  // Set headers for streaming
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const sendEvent = (data) => {
+    res.write(JSON.stringify(data) + '\n');
+  };
 
   // Use provided credentials or fallback to env vars
   console.log('=== EMAIL SCAN REQUEST ===');
@@ -97,7 +112,7 @@ export default async function handler(req, res) {
     host: emailCredentials?.host || 'default (imap.gmail.com)'
   });
   console.log('Email Filters:', emailFilters);
-  console.log('Env IMAP_PASSWORD:', process.env.IMAP_PASSWORD ? '✓ set' : '✗ not set');
+  console.log('Last Scanned UID:', lastScannedUid);
 
   const imapConfig = {
     imap: {
@@ -113,48 +128,48 @@ export default async function handler(req, res) {
     },
   };
 
-  console.log('Final IMAP Config:', {
-    user: imapConfig.imap.user,
-    host: imapConfig.imap.host,
-    port: imapConfig.imap.port,
-    hasPassword: !!imapConfig.imap.password
-  });
-
   if (!imapConfig.imap.user || !imapConfig.imap.password) {
-    return res.status(400).json({ error: 'Missing email credentials. Please configure them in Settings.' });
+    sendEvent({ type: 'error', error: 'Missing email credentials. Please configure them in Settings.' });
+    res.end();
+    return;
   }
 
+  let connection;
+
   try {
-    const connection = await imaps.connect(imapConfig);
+    connection = await imaps.connect(imapConfig);
 
     // Handle connection errors to prevent crash
     connection.on('error', (err) => {
       console.error('IMAP Connection Error (Runtime):', err);
+      sendEvent({ type: 'error', error: 'IMAP Connection Error: ' + err.message });
     });
 
     await connection.openBox('INBOX');
 
-    // Build search criteria using header-based filters only when specified
-    let searchCriteria;
+    // Build search criteria
+    let searchCriteria = [];
+
+    // 1. Filter by UID if resuming
+    if (lastScannedUid) {
+      searchCriteria.push(['UID', `${lastScannedUid + 1}:*`]);
+    }
+
     const hasSubjectFilter = emailFilters?.subject && emailFilters.subject.trim();
     const hasSenderFilter = emailFilters?.sender && emailFilters.sender.trim();
 
     if (hasSubjectFilter || hasSenderFilter) {
-      // Use header-based filters - search in ALL messages (not just UNSEEN)
-      searchCriteria = [];
-
       if (hasSubjectFilter) {
         searchCriteria.push(['SUBJECT', emailFilters.subject]);
       }
       if (hasSenderFilter) {
         searchCriteria.push(['FROM', emailFilters.sender]);
       }
-    } else {
-      // No filters specified, default to UNSEEN messages only
-      searchCriteria = ['UNSEEN'];
+    } else if (!lastScannedUid) {
+      // Default to UNSEEN only if not resuming and no specific filters
+      searchCriteria.push('UNSEEN');
     }
 
-    console.log('Email Filters Received:', emailFilters);
     console.log('IMAP Search Criteria:', JSON.stringify(searchCriteria, null, 2));
 
     const fetchOptions = {
@@ -164,81 +179,74 @@ export default async function handler(req, res) {
 
     const messages = await connection.search(searchCriteria, fetchOptions);
     console.log(`Found ${messages.length} messages`);
+
+    sendEvent({ type: 'status', message: `Found ${messages.length} emails to process...` });
+
     const candidates = [];
     let scannedCount = 0;
 
-    // Limit to 5 for demo purposes
-    const messagesToProcess = messages.slice(0, 5);
-
-    for (const message of messagesToProcess) {
+    // Process ALL messages found (no limit)
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
       try {
         scannedCount++;
+        const id = message.attributes.uid;
+
+        sendEvent({ type: 'progress', current: i + 1, total: messages.length, message: `Scanning email ${i + 1} of ${messages.length}...` });
+
         // Get the full raw message body
         const all = message.parts.find((part) => part.which === '');
-        console.log(`Message ${message.attributes.uid} parts:`, message.parts.map(p => ({ which: p.which, size: p.size })));
 
         if (!all) {
           console.warn(`Skipping message ${message.attributes.uid}: No body found`);
           continue;
         }
-        console.log(`Fetched body size: ${all.body.length} characters`);
-
-        const id = message.attributes.uid;
-        // const idHeader = "Imap-Id: " + id + "\r\n"; // Not needed when parsing full raw message
 
         const simpleMail = await simpleParser(all.body);
-        console.log(`Parsed mail keys: ${Object.keys(simpleMail).join(', ')}`);
-        console.log(`Attachments found: ${simpleMail.attachments ? simpleMail.attachments.length : 0}`);
 
         // Extract PDF attachments (resumes/CVs)
         let resumeText = '';
         if (simpleMail.attachments && simpleMail.attachments.length > 0) {
-          console.log(`Message ${id} has ${simpleMail.attachments.length} attachment(s)`);
-
           for (const attachment of simpleMail.attachments) {
-            console.log(`Checking attachment: Name="${attachment.filename}", Type="${attachment.contentType}", Size=${attachment.size}`);
-
-            // Check for PDF - be more permissive with content types
             const isPdfType = attachment.contentType === 'application/pdf';
             const isPdfExt = attachment.filename?.toLowerCase().endsWith('.pdf');
 
             if (isPdfType || isPdfExt) {
-              console.log(`PDF detected! Extracting: ${attachment.filename}`);
               try {
                 const pdfText = await extractPdfText(attachment.content);
                 if (pdfText) {
                   resumeText += `\n\n=== Resume (${attachment.filename}) ===\n${pdfText}`;
-                  console.log(`Successfully extracted ${pdfText.length} characters from ${attachment.filename}`);
-                  console.log('--- PDF CONTENT START ---');
-                  console.log(pdfText.substring(0, 500) + '... (truncated)');
-                  console.log('--- PDF CONTENT END ---');
                   break; // Process first PDF only
-                } else {
-                  console.warn(`Extracted text was empty for ${attachment.filename}`);
                 }
               } catch (e) {
                 console.error(`Failed to extract PDF text from ${attachment.filename}:`, e);
               }
-            } else {
-              console.log(`Skipping non-PDF attachment: ${attachment.filename}`);
             }
           }
-        } else {
-          console.log(`Message ${id} has NO attachments`);
         }
 
         const analysis = await analyzeEmail(simpleMail.subject, simpleMail.text, resumeText, jobCriteria);
 
         if (analysis) {
-          candidates.push({
+          const candidateData = {
             id: id.toString(),
             ...analysis,
-            originalEmailId: id.toString()
-          });
+            originalEmailId: id.toString(),
+            uid: id // Explicitly send UID for resume tracking
+          };
+
+          candidates.push(candidateData);
+
+          // Stream the candidate immediately
+          sendEvent({ type: 'candidate', candidate: candidateData });
+        } else {
+          // Send a "processed" event even if no candidate found, to update UID tracking
+          sendEvent({ type: 'processed', uid: id });
         }
+
       } catch (err) {
         console.error(`Error processing message ${message.attributes?.uid}:`, err);
-        // Continue to next message instead of crashing
+        // Continue to next message
       }
     }
 
@@ -280,24 +288,27 @@ export default async function handler(req, res) {
         <p style="margin-top: 20px; color: #666; font-size: 12px;">Generated by Recruiter Agent</p>
       `;
 
-      // Use the same credentials for SMTP
       const smtpCredentials = {
         user: imapConfig.imap.user,
         pass: imapConfig.imap.password,
-        host: imapConfig.imap.host === 'imap.gmail.com' ? 'smtp.gmail.com' : imapConfig.imap.host // Simple fallback
+        host: imapConfig.imap.host === 'imap.gmail.com' ? 'smtp.gmail.com' : imapConfig.imap.host
       };
 
-      console.log(`Sending summary email to ${recipient}...`);
-      await sendSummaryEmail(smtpCredentials, recipient, subject, htmlContent);
+      try {
+        await sendSummaryEmail(smtpCredentials, recipient, subject, htmlContent);
+        sendEvent({ type: 'status', message: 'Summary email sent.' });
+      } catch (e) {
+        console.error("Failed to send summary email", e);
+        sendEvent({ type: 'status', message: 'Failed to send summary email.' });
+      }
     }
 
-    res.status(200).json({ candidates, scannedCount });
+    sendEvent({ type: 'complete', scannedCount, candidateCount: candidates.length });
+    res.end();
+
   } catch (error) {
-    console.error('=== IMAP ERROR ===');
-    console.error('Error Type:', error.constructor.name);
-    console.error('Error Message:', error.message);
-    console.error('Error Stack:', error.stack);
-    console.error('Full Error:', JSON.stringify(error, null, 2));
-    res.status(500).json({ error: 'Failed to fetch or process emails', details: error.message, type: error.constructor.name });
+    console.error('=== IMAP ERROR ===', error);
+    sendEvent({ type: 'error', error: error.message });
+    res.end();
   }
 }

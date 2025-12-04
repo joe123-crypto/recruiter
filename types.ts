@@ -35,6 +35,7 @@ export interface CandidateAnalysis {
   recommendationReason: string;
   status: 'pending' | 'rejected' | 'interview';
   originalEmailId: string;
+  uid?: number;
 }
 
 export enum AppState {

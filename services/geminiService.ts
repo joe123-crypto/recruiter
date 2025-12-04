@@ -9,7 +9,12 @@ export const scanForCandidates = async (
   jobCriteria: JobCriteria,
   emailCredentials?: { user: string; pass: string; host: string },
   sendSummaryEmail: boolean = false,
-  emailFilters?: { subject: string; sender: string }
+  emailFilters?: { subject: string; sender: string },
+  lastScannedUid?: number,
+  onCandidateFound?: (candidate: CandidateAnalysis) => void,
+  onStatusUpdate?: (status: string) => void,
+  onProgress?: (current: number, total: number) => void,
+  onProcessed?: (uid: number) => void
 ): Promise<{ candidates: CandidateAnalysis[], scannedCount: number }> => {
   try {
     const response = await fetch('/api/scan', {
@@ -22,7 +27,8 @@ export const scanForCandidates = async (
         jobCriteria,
         emailCredentials,
         sendSummaryEmail,
-        emailFilters
+        emailFilters,
+        lastScannedUid
       }),
     });
 
@@ -32,8 +38,56 @@ export const scanForCandidates = async (
       throw new Error(`Scan failed: ${errorMessage}`);
     }
 
-    const data = await response.json();
-    return data;
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response body");
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const candidates: CandidateAnalysis[] = [];
+    let scannedCount = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep the last incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+
+          switch (event.type) {
+            case 'status':
+              onStatusUpdate?.(event.message);
+              break;
+            case 'progress':
+              onProgress?.(event.current, event.total);
+              onStatusUpdate?.(event.message);
+              break;
+            case 'candidate':
+              candidates.push(event.candidate);
+              onCandidateFound?.(event.candidate);
+              onProcessed?.(event.candidate.uid);
+              break;
+            case 'processed':
+              onProcessed?.(event.uid);
+              break;
+            case 'complete':
+              scannedCount = event.scannedCount;
+              break;
+            case 'error':
+              throw new Error(event.error);
+          }
+        } catch (e) {
+          console.error("Error parsing stream line:", line, e);
+        }
+      }
+    }
+
+    return { candidates, scannedCount };
   } catch (error) {
     console.error("Error scanning for candidates:", error);
     throw error;

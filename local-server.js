@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import scanHandler from './api/scan.js';
+import chatHandler from './api/chat.js';
 
 dotenv.config();
 
@@ -21,6 +22,16 @@ app.post('/api/scan', async (req, res) => {
         await scanHandler(req, res);
     } catch (error) {
         console.error('❌ Error in scan handler:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.post('/api/chat', async (req, res) => {
+    console.log('💬 Chat request received!');
+    try {
+        await chatHandler(req, res);
+    } catch (error) {
+        console.error('❌ Error in chat handler:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });

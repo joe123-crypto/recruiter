@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { CompanyProfile, CandidateAnalysis, DashboardTab } from '../types';
-import { Sparkles, LayoutDashboard, Settings as SettingsIcon, LogOut, Search, Bell, Menu, X } from 'lucide-react';
+import { Sparkles, LayoutDashboard, Settings as SettingsIcon, LogOut, Search, Bell, Menu, X, History } from 'lucide-react';
 import { Scanner } from './Scanner';
 import { Settings } from './Settings';
+import { RecentScans } from './RecentScans';
 
 interface Props {
   company: CompanyProfile;
@@ -14,16 +15,23 @@ interface Props {
 export const Dashboard: React.FC<Props> = ({ company, onStartPresentation, onLogout, onUpdateCompany }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>(DashboardTab.SCANNER);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [loadedScan, setLoadedScan] = useState<any>(null);
+
+  const handleLoadScan = (scan: any) => {
+    setLoadedScan(scan);
+    setActiveTab(DashboardTab.SCANNER);
+  };
 
   const NavItem = ({ tab, icon: Icon, label }: { tab: DashboardTab, icon: any, label: string }) => (
     <button
       onClick={() => {
         setActiveTab(tab);
         setIsMobileMenuOpen(false);
+        if (tab !== DashboardTab.SCANNER) setLoadedScan(null); // Reset loaded scan when leaving scanner
       }}
       className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 group ${activeTab === tab
-          ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 shadow-lg shadow-blue-900/20'
-          : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+        ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 shadow-lg shadow-blue-900/20'
+        : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
         }`}
     >
       <Icon size={20} className={`transition-transform duration-200 ${activeTab === tab ? 'scale-110' : 'group-hover:scale-110'}`} />
@@ -81,6 +89,7 @@ export const Dashboard: React.FC<Props> = ({ company, onStartPresentation, onLog
 
           <nav className="space-y-2">
             <NavItem tab={DashboardTab.SCANNER} icon={LayoutDashboard} label="Dashboard" />
+            <NavItem tab={DashboardTab.HISTORY} icon={History} label="Recent Scans" />
             <NavItem tab={DashboardTab.SETTINGS} icon={SettingsIcon} label="Settings" />
           </nav>
         </div>
@@ -117,7 +126,13 @@ export const Dashboard: React.FC<Props> = ({ company, onStartPresentation, onLog
         <div className="flex-1 overflow-y-auto overflow-x-hidden relative z-10 custom-scrollbar">
           <div className="max-w-7xl mx-auto p-4 md:p-8">
             {activeTab === DashboardTab.SCANNER ? (
-              <Scanner company={company} onStartPresentation={onStartPresentation} />
+              <Scanner
+                company={company}
+                onStartPresentation={onStartPresentation}
+                initialState={loadedScan}
+              />
+            ) : activeTab === DashboardTab.HISTORY ? (
+              <RecentScans onLoadScan={handleLoadScan} />
             ) : (
               <Settings company={company} onUpdate={onUpdateCompany} />
             )}
