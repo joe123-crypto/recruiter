@@ -1,81 +1,93 @@
 import React, { useState } from 'react';
 import { CompanyProfile } from '../types';
 import { Building2, MapPin, Mail, Briefcase, ArrowRight, Lock, Sparkles, CheckCircle2 } from 'lucide-react';
-import { saveProfile, getProfile } from '../services/storageService';
-import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
-import { jwtDecode } from 'jwt-decode';
+import { auth } from '../src/lib/firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { getUserProfile, createUserProfile } from '../services/userService';
 
 interface Props {
   onLogin: (profile: CompanyProfile) => void;
 }
 
-interface GoogleJWT {
-  name?: string;
-  email?: string;
-  picture?: string;
-}
-
 export const Auth: React.FC<Props> = ({ onLogin }) => {
   const [isRegistering, setIsRegistering] = useState(true);
   const [error, setError] = useState('');
-  const [formData, setFormData] = useState<CompanyProfile & { password?: string }>({
-    name: '',
-    location: '',
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState({
     email: '',
-    industry: 'Technology',
     password: ''
   });
 
-  const handleGoogleSuccess = (credentialResponse: CredentialResponse) => {
+  const handleGoogleLogin = async () => {
+    setError('');
+    setIsLoading(true);
     try {
-      if (!credentialResponse.credential) return;
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
 
-      const decoded = jwtDecode<GoogleJWT>(credentialResponse.credential);
-      const googleEmail = decoded.email || '';
-      const googleName = decoded.name || '';
+      // Check if profile exists in Firestore
+      let profile = await getUserProfile(user.uid);
 
-      if (isRegistering) {
-        setFormData({
-          ...formData,
-          name: googleName,
-          email: googleEmail
-        });
-      } else {
-        const stored = getProfile();
-        if (stored && stored.email === googleEmail) {
-          onLogin(stored);
-        } else {
-          setError('No account found with this Google email. Please sign up first.');
-        }
+      if (!profile) {
+        // Create new profile
+        profile = await createUserProfile(user.uid, user.email || '', user.displayName || '');
       }
-    } catch (err) {
+
+      onLogin(profile);
+    } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      setError('Failed to process Google Sign-In');
+      setError(err.message || 'Failed to sign in with Google');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
-    if (isRegistering) {
-      if (formData.name && formData.email) {
-        const profile: CompanyProfile = {
-          name: formData.name,
-          location: formData.location,
-          email: formData.email,
-          industry: formData.industry
-        };
-        saveProfile(profile);
+    try {
+      if (isRegistering) {
+        if (!formData.email || !formData.password) {
+          throw new Error('Please fill in all fields');
+        }
+
+        // Create user in Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+
+        // Create profile in Firestore
+        const profile = await createUserProfile(userCredential.user.uid, formData.email);
+
         onLogin(profile);
-      }
-    } else {
-      const stored = getProfile();
-      if (stored && stored.email === formData.email) {
-        onLogin(stored);
+
       } else {
-        setError('Invalid credentials or no account found.');
+        // Sign in
+        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+
+        // Fetch profile
+        const profile = await getUserProfile(userCredential.user.uid);
+
+        if (profile) {
+          onLogin(profile);
+        } else {
+          // Fallback: Create if missing
+          const newProfile = await createUserProfile(userCredential.user.uid, formData.email);
+          onLogin(newProfile);
+        }
       }
+    } catch (err: any) {
+      console.error('Auth error:', err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('Email already in use. Please sign in.');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Invalid email or password.');
+      } else {
+        setError(err.message || 'Authentication failed');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -157,16 +169,19 @@ export const Auth: React.FC<Props> = ({ onLogin }) => {
             </div>
 
             <div className="mb-6">
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => setError('Google Sign-In failed')}
-                useOneTap
-                theme="filled_black"
-                size="large"
-                width="100%"
-                locale="en"
-                shape="pill"
-              />
+              <button
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
+                className="w-full bg-white text-slate-900 font-semibold py-3 rounded-xl shadow hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.84z" />
+                  <path fill="#EA4335" d="M12 4.66c1.61 0 3.02.56 4.13 1.62L19.16 3.29C17.17 1.45 14.75 0 12 0 7.7 0 3.99 2.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                </svg>
+                Sign in with Google
+              </button>
             </div>
 
             <div className="relative mb-8">
@@ -183,40 +198,6 @@ export const Auth: React.FC<Props> = ({ onLogin }) => {
                 <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex items-center gap-2 animate-fadeIn">
                   <div className="w-1.5 h-1.5 rounded-full bg-red-400"></div>
                   {error}
-                </div>
-              )}
-
-              {isRegistering && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Company</label>
-                    <div className="relative group">
-                      <Building2 className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                      <input
-                        type="text"
-                        required={isRegistering}
-                        className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                        placeholder="Acme Inc"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Location</label>
-                    <div className="relative group">
-                      <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                      <input
-                        type="text"
-                        required={isRegistering}
-                        className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                        placeholder="New York"
-                        value={formData.location}
-                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      />
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -244,36 +225,19 @@ export const Auth: React.FC<Props> = ({ onLogin }) => {
                     required
                     className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                     placeholder="••••••••"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
                 </div>
               </div>
 
-              {isRegistering && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Industry</label>
-                  <div className="relative group">
-                    <Briefcase className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                    <select
-                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
-                      value={formData.industry}
-                      onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
-                    >
-                      <option value="Technology">Technology</option>
-                      <option value="Finance">Finance</option>
-                      <option value="Healthcare">Healthcare</option>
-                      <option value="Retail">Retail</option>
-                      <option value="Education">Education</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 group"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {isRegistering ? 'Create Account' : 'Sign In'}
-                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                {isLoading ? 'Processing...' : (isRegistering ? 'Create Account' : 'Sign In')}
+                {!isLoading && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
               </button>
             </form>
 
@@ -288,20 +252,6 @@ export const Auth: React.FC<Props> = ({ onLogin }) => {
                   <>Don't have an account? <span className="text-blue-400 font-medium">Sign Up</span></>
                 )}
               </button>
-
-              <div className="pt-6 border-t border-slate-800/50">
-                <button
-                  onClick={() => {
-                    if (window.confirm('Are you sure you want to clear all app data? This will reset your account.')) {
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="text-xs text-slate-600 hover:text-red-400 transition-colors"
-                >
-                  Reset Application Data
-                </button>
-              </div>
             </div>
           </div>
         </div>

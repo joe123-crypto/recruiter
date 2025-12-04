@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { CompanyProfile } from '../types';
-import { Mail, Key, ExternalLink, CheckCircle, Clipboard, ArrowRight, ShieldCheck, AlertCircle, Edit2, Sparkles } from 'lucide-react';
-import { saveProfile } from '../services/storageService';
+import { Building2, MapPin, Briefcase, ArrowRight, CheckCircle2, Mail, Lock, User } from 'lucide-react';
+import { updateUserProfile } from '../services/userService';
+import { auth } from '../src/lib/firebase';
 
 interface Props {
   company: CompanyProfile;
@@ -9,242 +10,259 @@ interface Props {
 }
 
 export const Onboarding: React.FC<Props> = ({ company, onComplete }) => {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [scanningEmail, setScanningEmail] = useState(company.email);
-  const [password, setPassword] = useState('');
-  const [isListening, setIsListening] = useState(false);
-  const [detected, setDetected] = useState(false);
-  const [error, setError] = useState('');
+  const [step, setStep] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState<CompanyProfile>({
+    ...company,
+    role: company.role || '',
+    imapUser: company.imapUser || company.email || '',
+    imapPassword: ''
+  });
 
-  // Smart Clipboard Listener
-  useEffect(() => {
-    const checkClipboard = async () => {
-      if (!isListening) return;
+  const [useLoginEmail, setUseLoginEmail] = useState(true);
 
+  const handleNext = async () => {
+    if (step < 3) {
+      setStep(step + 1);
+    } else {
+      setIsLoading(true);
       try {
-        const text = await navigator.clipboard.readText();
-        const cleanText = text.replace(/\s/g, '');
+        if (auth.currentUser) {
+          const updatedProfile = {
+            ...formData,
+            onboardingComplete: true,
+            // If using login email, ensure imapUser matches email
+            imapUser: useLoginEmail ? formData.email : formData.imapUser
+          };
 
-        if (cleanText.length === 16 && /^[a-z]+$/.test(cleanText)) {
-          setPassword(cleanText);
-          setDetected(true);
-          setIsListening(false);
-          setError('');
+          await updateUserProfile(auth.currentUser.uid, updatedProfile);
+          onComplete(updatedProfile);
         }
-      } catch (err) {
-        console.log("Clipboard access denied or empty");
+      } catch (error) {
+        console.error("Failed to save profile", error);
+        alert("Failed to save profile. Please try again.");
+      } finally {
+        setIsLoading(false);
       }
-    };
-
-    window.addEventListener('focus', checkClipboard);
-    const interval = isListening ? setInterval(checkClipboard, 1000) : undefined;
-
-    return () => {
-      window.removeEventListener('focus', checkClipboard);
-      if (interval) clearInterval(interval);
-    };
-  }, [isListening]);
-
-  const handleOpenGoogle = () => {
-    window.open('https://myaccount.google.com/apppasswords', '_blank');
-    setIsListening(true);
-    setError('');
-  };
-
-  const handleManualPaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const cleanText = text.replace(/\s/g, '');
-
-      if (cleanText.length !== 16) {
-        setError('Clipboard content does not look like an App Password (must be 16 letters).');
-        return;
-      }
-
-      setPassword(cleanText);
-      setDetected(true);
-      setError('');
-    } catch (err) {
-      console.error("Failed to read clipboard");
-      setError('Could not access clipboard. Please paste manually.');
     }
   };
 
-  const handleSubmit = () => {
-    if (!password) return;
-
-    const updatedProfile = {
-      ...company,
-      imapUser: scanningEmail,
-      imapPassword: password,
-      imapHost: 'imap.gmail.com'
-    };
-
-    saveProfile(updatedProfile);
-    onComplete(updatedProfile);
-  };
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#020617] p-4 relative overflow-hidden">
-      {/* Background Effects */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] animate-pulse-glow"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse-glow delay-1000"></div>
+    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Background Gradients */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+        <div className="absolute top-[-20%] left-[20%] w-[40%] h-[40%] bg-blue-600/10 rounded-full blur-[100px]"></div>
+        <div className="absolute bottom-[-20%] right-[20%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[100px]"></div>
       </div>
 
-      <div className="glass-panel w-full max-w-3xl p-8 rounded-2xl shadow-2xl border border-slate-700/50 flex flex-col md:flex-row overflow-hidden relative z-10 animate-fadeIn">
-
-        {/* Left Side: Context */}
-        <div className="md:w-1/2 pr-8 border-r border-slate-700/50 flex flex-col justify-between">
-          <div>
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-blue-500/20">
-              <Mail className="text-white w-6 h-6" />
-            </div>
-            <h1 className="text-2xl font-bold text-white mb-3">Connect Your Email</h1>
-            <p className="text-slate-400 text-sm leading-relaxed mb-6">
-              To scan for job applications, the agent needs read-access to your inbox.
-              For security, Google requires a dedicated <strong>App Password</strong> instead of your real password.
-            </p>
-
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="text-blue-400 w-5 h-5 mt-0.5 shrink-0" />
-                <div>
-                  <h4 className="text-sm font-semibold text-blue-300">100% Secure</h4>
-                  <p className="text-xs text-blue-400/80 mt-1">
-                    This password only works for this app. You can revoke it anytime in your Google Account.
-                  </p>
-                </div>
+      <div className="w-full max-w-2xl relative z-10">
+        {/* Progress Steps */}
+        <div className="flex justify-between mb-12 relative">
+          <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-800 -z-10"></div>
+          {[1, 2, 3].map((s) => (
+            <div key={s} className={`flex flex-col items-center gap-2 ${step >= s ? 'text-blue-400' : 'text-slate-600'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${step >= s
+                ? 'bg-slate-900 border-blue-500 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.5)]'
+                : 'bg-slate-900 border-slate-700 text-slate-600'
+                }`}>
+                {step > s ? <CheckCircle2 size={20} /> : s}
               </div>
+              <span className="text-xs font-medium uppercase tracking-wider bg-[#020617] px-2">
+                {s === 1 ? 'Profile' : s === 2 ? 'Email Setup' : 'Connect'}
+              </span>
             </div>
-          </div>
-
-          <div className="mt-8 md:mt-0">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
-              <div className={`w-2 h-2 rounded-full transition-colors ${step === 1 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]' : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'}`}></div>
-              Step {step} of 2: <span className="text-slate-300">{step === 1 ? 'Confirm Email' : 'Secure Connection'}</span>
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Right Side: Action */}
-        <div className="md:w-1/2 pl-8 flex flex-col justify-center space-y-6">
-
-          {step === 1 ? (
-            <div className="animate-fadeIn">
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 ml-1">
-                Which email should we scan?
-              </label>
-
-              <div className="relative mb-4 group">
-                <Mail className="absolute left-3 top-3 w-5 h-5 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
-                <input
-                  type="email"
-                  value={scanningEmail}
-                  onChange={(e) => setScanningEmail(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                />
+        <div className="glass-panel p-8 md:p-12 rounded-2xl shadow-2xl animate-fadeIn">
+          {step === 1 && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold text-white mb-2">Tell us about you & your company</h2>
+                <p className="text-slate-400">We'll customize the agent for your specific needs.</p>
               </div>
 
-              <p className="text-xs text-slate-500 mb-6 ml-1">
-                This should be the Gmail account where you receive job applications.
-              </p>
-
-              <button
-                onClick={() => setStep(2)}
-                disabled={!scanningEmail.includes('@')}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next <ArrowRight size={18} />
-              </button>
-            </div>
-          ) : (
-            <div className="animate-fadeIn">
-              {/* Step 2a: Generate */}
-              <div className={`transition-all duration-300 ${detected ? 'opacity-50 blur-[1px] pointer-events-none' : 'opacity-100'}`}>
-                <div className="flex justify-between items-center mb-3">
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Generate Password</label>
-                  <button onClick={() => setStep(1)} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors">
-                    <Edit2 size={10} /> {scanningEmail}
-                  </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Company Name</label>
+                  <div className="relative group">
+                    <Building2 className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                    <input
+                      type="text"
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      placeholder="Acme Inc"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    />
+                  </div>
                 </div>
 
-                <button
-                  onClick={handleOpenGoogle}
-                  className="w-full group relative flex items-center justify-between p-4 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 hover:border-blue-500/50 rounded-xl transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm">
-                      <img src="https://www.google.com/favicon.ico" alt="G" className="w-4 h-4" />
-                    </div>
-                    <div className="text-left">
-                      <span className="block text-white font-medium group-hover:text-blue-400 transition-colors">Create App Password</span>
-                      <span className="block text-xs text-slate-400">Opens Google Security</span>
-                    </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Location</label>
+                  <div className="relative group">
+                    <MapPin className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                    <input
+                      type="text"
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      placeholder="New York, NY"
+                      value={formData.location}
+                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    />
                   </div>
-                  <ExternalLink size={16} className="text-slate-500 group-hover:text-blue-400 transition-colors" />
-                </button>
-                {isListening && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-blue-400 animate-pulse ml-1">
-                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full shadow-[0_0_5px_rgba(96,165,250,0.8)]"></div>
-                    Waiting for you to copy the password...
-                  </div>
-                )}
-              </div>
-
-              {/* Step 2b: Paste/Detect */}
-              <div className="mt-8">
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 ml-1">Paste & Connect</label>
-
-                <div className="relative group">
-                  <input
-                    type="text"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setError('');
-                    }}
-                    placeholder="Paste 16-character password"
-                    className={`w-full bg-slate-900/50 border-2 rounded-xl py-3 pl-10 pr-4 text-white placeholder-slate-600 outline-none transition-all font-mono tracking-widest ${detected
-                      ? 'border-green-500/50 focus:border-green-500 shadow-[0_0_20px_rgba(34,197,94,0.1)]'
-                      : error ? 'border-red-500/50 focus:border-red-500' : 'border-slate-700 focus:border-blue-500'
-                      }`}
-                  />
-                  <Key className={`absolute left-3 top-3.5 w-5 h-5 transition-colors ${detected ? 'text-green-400' : 'text-slate-500'}`} />
-
-                  {detected && (
-                    <div className="absolute right-3 top-3.5 text-green-400 animate-scaleIn">
-                      <CheckCircle size={20} />
-                    </div>
-                  )}
                 </div>
 
-                {error && (
-                  <div className="mt-3 text-xs text-red-400 flex items-center gap-1.5 ml-1 animate-fadeIn">
-                    <AlertCircle size={12} /> {error}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Industry</label>
+                  <div className="relative group">
+                    <Briefcase className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                    <select
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all appearance-none cursor-pointer"
+                      value={formData.industry}
+                      onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
+                    >
+                      <option value="Technology">Technology</option>
+                      <option value="Finance">Finance</option>
+                      <option value="Healthcare">Healthcare</option>
+                      <option value="Retail">Retail</option>
+                      <option value="Education">Education</option>
+                    </select>
                   </div>
-                )}
+                </div>
 
-                {!detected && (
-                  <button
-                    onClick={handleManualPaste}
-                    className="mt-3 text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1.5 ml-1 transition-colors"
-                  >
-                    <Clipboard size={12} /> Paste from clipboard
-                  </button>
-                )}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Your Role</label>
+                  <div className="relative group">
+                    <User className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                    <input
+                      type="text"
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      placeholder="e.g. HR Manager, Recruiter"
+                      value={formData.role}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    />
+                  </div>
+                </div>
               </div>
-
-              <button
-                onClick={handleSubmit}
-                disabled={!password || password.length < 16}
-                className="w-full mt-8 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-500/20 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2"
-              >
-                Connect Agent <ArrowRight size={18} />
-              </button>
             </div>
           )}
 
+          {step === 2 && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold text-white mb-2">Scanning Configuration</h2>
+                <p className="text-slate-400">Which email account should the agent scan for resumes?</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                <div
+                  onClick={() => setUseLoginEmail(true)}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center gap-4 ${useLoginEmail
+                    ? 'bg-blue-600/10 border-blue-500'
+                    : 'bg-slate-900/50 border-slate-700 hover:border-slate-600'}`}
+                >
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${useLoginEmail ? 'border-blue-500' : 'border-slate-600'}`}>
+                    {useLoginEmail && <div className="w-3 h-3 rounded-full bg-blue-500" />}
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Use Login Email</h4>
+                    <p className="text-slate-400 text-sm">{formData.email}</p>
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setUseLoginEmail(false)}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center gap-4 ${!useLoginEmail
+                    ? 'bg-blue-600/10 border-blue-500'
+                    : 'bg-slate-900/50 border-slate-700 hover:border-slate-600'}`}
+                >
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${!useLoginEmail ? 'border-blue-500' : 'border-slate-600'}`}>
+                    {!useLoginEmail && <div className="w-3 h-3 rounded-full bg-blue-500" />}
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Use Different Email</h4>
+                    <p className="text-slate-400 text-sm">Scan a dedicated recruitment inbox</p>
+                  </div>
+                </div>
+              </div>
+
+              {!useLoginEmail && (
+                <div className="space-y-2 animate-fadeIn">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">Scanning Email Address</label>
+                  <div className="relative group">
+                    <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                    <input
+                      type="email"
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                      placeholder="jobs@company.com"
+                      value={formData.imapUser}
+                      onChange={(e) => setFormData({ ...formData, imapUser: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold text-white mb-2">Connect Email</h2>
+                <p className="text-slate-400">
+                  Enter an App Password for <strong>{useLoginEmail ? formData.email : formData.imapUser}</strong> to allow the agent to scan emails.
+                </p>
+              </div>
+
+              <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-4 mb-6">
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
+                    <span className="text-blue-400 font-bold text-xs">i</span>
+                  </div>
+                  <div className="text-sm text-blue-200/80">
+                    <p className="font-semibold text-blue-200 mb-1">How to get an App Password:</p>
+                    <ol className="list-decimal ml-4 space-y-1">
+                      <li>Go to Google Account Settings &gt; Security</li>
+                      <li>Enable 2-Step Verification if not already on</li>
+                      <li>Search for "App Passwords"</li>
+                      <li>Create one named "RecruitAI" and paste it below</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider ml-1">App Password</label>
+                <div className="relative group">
+                  <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+                  <input
+                    type="password"
+                    className="w-full bg-slate-900/50 border border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                    placeholder="xxxx xxxx xxxx xxxx"
+                    value={formData.imapPassword}
+                    onChange={(e) => setFormData({ ...formData, imapPassword: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-8 flex gap-4">
+            {step > 1 && (
+              <button
+                onClick={() => setStep(step - 1)}
+                className="px-6 py-3.5 rounded-xl border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 transition-all font-medium"
+              >
+                Back
+              </button>
+            )}
+            <button
+              onClick={handleNext}
+              disabled={isLoading || (step === 3 && !formData.imapPassword)}
+              className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Saving...' : (step === 3 ? 'Complete Setup' : 'Continue')}
+              {!isLoading && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
+            </button>
+          </div>
         </div>
       </div>
     </div>

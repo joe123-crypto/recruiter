@@ -1,41 +1,15 @@
-export interface CompanyProfile {
-  name: string;
-  location: string;
-  email: string;
-  industry: string;
-  imapUser?: string;
-  imapHost?: string;
-  imapPassword?: string;
+export enum AgentStatus {
+  IDLE = 'IDLE',
+  SCANNING = 'SCANNING',
+  ANALYZING = 'ANALYZING',
+  COMPLETED = 'COMPLETED',
+  ERROR = 'ERROR'
 }
 
-export interface JobCriteria {
-  jobTitle: string;
-  experienceLevel: string;
-  keySkills: string;
-  deadline: string;
-}
-
-export interface EmailData {
-  id: string;
-  sender: string;
-  subject: string;
-  body: string;
-  date: string;
-}
-
-export interface CandidateAnalysis {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  score: number; // 0-100
-  summary: string;
-  strengths: string[];
-  weaknesses: string[];
-  recommendationReason: string;
-  status: 'pending' | 'rejected' | 'interview';
-  originalEmailId: string;
-  uid?: number;
+export enum DashboardTab {
+  SCANNER = 'SCANNER',
+  SETTINGS = 'SETTINGS',
+  HISTORY = 'HISTORY'
 }
 
 export enum AppState {
@@ -45,15 +19,34 @@ export enum AppState {
   PRESENTATION = 'PRESENTATION'
 }
 
-export enum AgentStatus {
-  IDLE = 'IDLE',
-  GENERATING_EMAILS = 'GENERATING_EMAILS',
-  SCANNING = 'SCANNING',
-  ANALYZING = 'ANALYZING',
-  COMPLETE = 'COMPLETE'
+export interface CandidateAnalysis {
+  name: string;
+  email: string;
+  matchScore: number;
+  summary: string;
+  status: 'Shortlisted' | 'Rejected' | 'Pending';
+  skills: string[];
+  experience: number;
+  education: string;
+  uid?: number; // Added for resume capability
 }
 
-export enum DashboardTab {
-  SCANNER = 'SCANNER',
-  SETTINGS = 'SETTINGS'
+export interface CompanyProfile {
+  name: string;
+  location: string;
+  email: string;
+  industry: string;
+  role?: string;
+  imapUser?: string;
+  imapHost?: string;
+  imapPassword?: string;
+  onboardingComplete?: boolean;
+}
+
+export interface ScanHistoryItem {
+  id: string;
+  timestamp: number;
+  jobCriteria: string;
+  candidates: CandidateAnalysis[];
+  lastScannedUid?: number;
 }
