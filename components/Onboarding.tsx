@@ -220,9 +220,10 @@ export const Onboarding: React.FC<Props> = ({ company, onComplete }) => {
                   <div className="text-sm text-blue-200/80">
                     <p className="font-semibold text-blue-200 mb-1">How to get an App Password:</p>
                     <ol className="list-decimal ml-4 space-y-1">
-                      <li>Go to Google Account Settings &gt; Security</li>
+                      <li>
+                        Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">Google App Passwords</a>
+                      </li>
                       <li>Enable 2-Step Verification if not already on</li>
-                      <li>Search for "App Passwords"</li>
                       <li>Create one named "RecruitAI" and paste it below</li>
                     </ol>
                   </div>

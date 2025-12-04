@@ -29,7 +29,14 @@ export default function App() {
             setAppState(AppState.ONBOARDING);
           }
         } else {
-          // Profile doesn't exist yet (should be created in Auth, but handle edge case)
+          // Profile doesn't exist yet (new user)
+          setCompany({
+            name: '',
+            location: '',
+            email: user.email || '',
+            industry: 'Technology',
+            onboardingComplete: false
+          });
           setAppState(AppState.ONBOARDING);
         }
       } else {
