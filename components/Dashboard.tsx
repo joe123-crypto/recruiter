@@ -7,12 +7,13 @@ import { RecentScans } from './RecentScans';
 
 interface Props {
   company: CompanyProfile;
+  userId?: string;
   onStartPresentation: (candidates: CandidateAnalysis[]) => void;
   onLogout: () => void;
   onUpdateCompany: (profile: CompanyProfile) => void;
 }
 
-export const Dashboard: React.FC<Props> = ({ company, onStartPresentation, onLogout, onUpdateCompany }) => {
+export const Dashboard: React.FC<Props> = ({ company, userId, onStartPresentation, onLogout, onUpdateCompany }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>(DashboardTab.SCANNER);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loadedScan, setLoadedScan] = useState<any>(null);
@@ -128,6 +129,7 @@ export const Dashboard: React.FC<Props> = ({ company, onStartPresentation, onLog
             {activeTab === DashboardTab.SCANNER ? (
               <Scanner
                 company={company}
+                userId={userId}
                 onStartPresentation={onStartPresentation}
                 initialState={loadedScan}
               />

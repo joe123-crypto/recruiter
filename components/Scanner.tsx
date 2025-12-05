@@ -8,11 +8,12 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recha
 
 interface Props {
     company: CompanyProfile;
+    userId?: string;
     onStartPresentation: (candidates: CandidateAnalysis[]) => void;
     initialState?: any; // Allow passing state from history
 }
 
-export const Scanner: React.FC<Props> = ({ company, onStartPresentation, initialState }) => {
+export const Scanner: React.FC<Props> = ({ company, userId, onStartPresentation, initialState }) => {
     const [status, setStatus] = useState<AgentStatus>(AgentStatus.IDLE);
     const [emails, setEmails] = useState<EmailData[]>([]);
     const [candidates, setCandidates] = useState<CandidateAnalysis[]>([]);
@@ -288,12 +289,14 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation, initial
                 <ChatInterface
                     candidates={candidates}
                     jobCriteria={jobCriteria}
+                    userId={userId}
+                    companyProfile={company}
                     onClose={() => setShowChat(false)}
                 />
             )}
 
             {/* Floating Chat Button (when closed but available) */}
-            {!showChat && status === AgentStatus.COMPLETE && candidates.length > 0 && (
+            {!showChat && candidates.length > 0 && (
                 <button
                     onClick={() => setShowChat(true)}
                     className="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg shadow-blue-600/30 flex items-center justify-center z-40 transition-transform hover:scale-110 animate-bounce-in"
@@ -462,7 +465,7 @@ export const Scanner: React.FC<Props> = ({ company, onStartPresentation, initial
 
             {/* Header */}
             <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
-                <h2 className="text-lg font-medium text-white">Recruitment Agent Console</h2>
+                <h2 className="text-lg font-medium text-white">RecruitAI Agent Console</h2>
 
                 <div className="flex items-center gap-3">
                     {/* Status Message Display */}

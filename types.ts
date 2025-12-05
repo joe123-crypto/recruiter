@@ -2,7 +2,8 @@ export enum AgentStatus {
   IDLE = 'IDLE',
   SCANNING = 'SCANNING',
   ANALYZING = 'ANALYZING',
-  COMPLETED = 'COMPLETED',
+  COMPLETE = 'COMPLETE',
+  GENERATING_EMAILS = 'GENERATING_EMAILS',
   ERROR = 'ERROR'
 }
 
@@ -20,15 +21,18 @@ export enum AppState {
 }
 
 export interface CandidateAnalysis {
+  id: string;
   name: string;
   email: string;
-  matchScore: number;
+  role: string;
+  score: number;
   summary: string;
-  status: 'Shortlisted' | 'Rejected' | 'Pending';
-  skills: string[];
-  experience: number;
-  education: string;
-  uid?: number; // Added for resume capability
+  strengths: string[];
+  weaknesses: string[];
+  recommendationReason: string;
+  status: string;
+  originalEmailId?: string;
+  uid?: number;
 }
 
 export interface CompanyProfile {
@@ -43,10 +47,24 @@ export interface CompanyProfile {
   onboardingComplete?: boolean;
 }
 
+export interface JobCriteria {
+  jobTitle: string;
+  experienceLevel: string;
+  keySkills: string;
+  deadline?: string;
+}
+
+export interface EmailData {
+  subject: string;
+  from: string;
+  body: string;
+  uid: number;
+}
+
 export interface ScanHistoryItem {
   id: string;
   timestamp: number;
-  jobCriteria: string;
+  jobCriteria: JobCriteria;
   candidates: CandidateAnalysis[];
   lastScannedUid?: number;
 }

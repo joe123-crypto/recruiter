@@ -11,11 +11,18 @@ interface Props {
     candidates: CandidateAnalysis[];
     jobCriteria: JobCriteria;
     onClose: () => void;
+    userId?: string; // Firebase user ID for accessing company profile
+    companyProfile: any;
 }
 
-export const ChatInterface: React.FC<Props> = ({ candidates, jobCriteria, onClose }) => {
+export const ChatInterface: React.FC<Props> = ({ candidates, jobCriteria, onClose, userId, companyProfile }) => {
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: `I've finished scanning. Found ${candidates.length} candidates. Ask me anything about the results!` }
+        {
+            role: 'assistant',
+            content: `I've finished scanning and found ${candidates.length} candidate${candidates.length !== 1 ? 's' : ''}! 
+
+I can help you analyze them, compare skills, or even send interview invitations. Just ask me what you'd like to do! 🚀`
+        }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -44,7 +51,9 @@ export const ChatInterface: React.FC<Props> = ({ candidates, jobCriteria, onClos
                 body: JSON.stringify({
                     messages: [...messages, userMessage],
                     candidates,
-                    jobCriteria
+                    jobCriteria,
+                    userId,
+                    companyProfile
                 })
             });
 
@@ -69,8 +78,8 @@ export const ChatInterface: React.FC<Props> = ({ candidates, jobCriteria, onClos
                         <Bot size={18} className="text-white" />
                     </div>
                     <div>
-                        <h3 className="text-sm font-bold text-white">Agent Chat</h3>
-                        <p className="text-xs text-slate-400">Ask about findings</p>
+                        <h3 className="text-sm font-bold text-white">AI Recruitment Agent</h3>
+                        <p className="text-xs text-slate-400">Ask questions or request actions</p>
                     </div>
                 </div>
                 <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
@@ -86,8 +95,8 @@ export const ChatInterface: React.FC<Props> = ({ candidates, jobCriteria, onClos
                             {msg.role === 'user' ? <User size={14} className="text-slate-300" /> : <Bot size={14} className="text-blue-400" />}
                         </div>
                         <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${msg.role === 'user'
-                                ? 'bg-blue-600 text-white rounded-tr-none'
-                                : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
+                            ? 'bg-blue-600 text-white rounded-tr-none'
+                            : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'
                             }`}>
                             {msg.content}
                         </div>
