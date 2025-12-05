@@ -111,7 +111,7 @@ export const extractJobCriteriaFromDoc = async (base64Data: string, mimeType: st
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: {
         role: "user",
         parts: [
@@ -140,10 +140,25 @@ export const extractJobCriteriaFromDoc = async (base64Data: string, mimeType: st
     });
 
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error("No text generated");
+    if (!text) {
+      console.error("=== GEMINI API ERROR: No text generated ===");
+      console.error("Full response:", JSON.stringify(response, null, 2));
+      throw new Error("No text generated");
+    }
     return JSON.parse(text);
-  } catch (e) {
-    console.error("Error extracting job criteria:", e);
+  } catch (e: any) {
+    console.error("=== ERROR EXTRACTING JOB CRITERIA ===");
+    console.error("Error Type:", e?.constructor?.name);
+    console.error("Error Message:", e?.message);
+    if (e?.response) {
+      console.error("Response Status:", e.response?.status);
+      console.error("Response Data:", JSON.stringify(e.response?.data, null, 2));
+    }
+    if (e?.details) {
+      console.error("Error Details:", JSON.stringify(e.details, null, 2));
+    }
+    console.error("Full Error:", e);
+    console.error("Stack:", e?.stack);
     return null;
   }
 };
@@ -163,7 +178,7 @@ export const generatePresentationScript = async (candidates: CandidateAnalysis[]
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -181,9 +196,24 @@ export const generatePresentationScript = async (candidates: CandidateAnalysis[]
     });
 
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      console.error("=== GEMINI API ERROR: No text generated ===");
+      console.error("Full response:", JSON.stringify(response, null, 2));
+      return [{ title: "Error", content: "Could not generate presentation." }];
+    }
     return JSON.parse(text || "[]");
-  } catch (e) {
-    console.error(e);
+  } catch (e: any) {
+    console.error("=== ERROR GENERATING PRESENTATION ===");
+    console.error("Error Type:", e?.constructor?.name);
+    console.error("Error Message:", e?.message);
+    if (e?.response) {
+      console.error("Response Status:", e.response?.status);
+      console.error("Response Data:", JSON.stringify(e.response?.data, null, 2));
+    }
+    if (e?.details) {
+      console.error("Error Details:", JSON.stringify(e.details, null, 2));
+    }
+    console.error("Full Error:", e);
     return [{ title: "Error", content: "Could not generate presentation." }];
   }
 };

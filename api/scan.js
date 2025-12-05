@@ -104,21 +104,36 @@ export default async function handler(req, res) {
     res.write(JSON.stringify(data) + '\n');
   };
 
-  // Use provided credentials or fallback to env vars
+  // Log incoming request details
   console.log('=== EMAIL SCAN REQUEST ===');
-  console.log('Email Credentials:', {
-    user: emailCredentials?.user ? '✓ provided' : '✗ missing',
-    pass: emailCredentials?.pass ? '✓ provided (length: ' + emailCredentials?.pass?.length + ')' : '✗ missing',
-    host: emailCredentials?.host || 'default (imap.gmail.com)'
+  console.log('📧 Received emailCredentials object:', emailCredentials ? 'YES' : 'NO');
+  console.log('📧 emailCredentials:', {
+    exists: !!emailCredentials,
+    user: emailCredentials?.user ? `✓ provided (${emailCredentials.user})` : '✗ missing',
+    pass: emailCredentials?.pass ? `✓ provided (length: ${emailCredentials.pass.length})` : '✗ missing',
+    host: emailCredentials?.host || 'not specified'
   });
   console.log('Email Filters:', emailFilters);
   console.log('Last Scanned UID:', lastScannedUid);
 
+  // IMPORTANT: Use database credentials ONLY - do NOT fall back to .env
+  // The .env credentials are placeholders and should never be used
+  if (!emailCredentials || !emailCredentials.user || !emailCredentials.pass) {
+    console.error('❌ No valid credentials provided from database!');
+    sendEvent({
+      type: 'error',
+      error: 'Missing email credentials. Please configure your IMAP credentials in Settings or Onboarding.',
+      details: 'Database credentials (imapUser/imapPassword) must be set in your company profile.'
+    });
+    res.end();
+    return;
+  }
+
   const imapConfig = {
     imap: {
-      user: emailCredentials?.user || process.env.IMAP_USER,
-      password: emailCredentials?.pass || process.env.IMAP_PASSWORD,
-      host: emailCredentials?.host || process.env.IMAP_HOST || 'imap.gmail.com',
+      user: emailCredentials.user,
+      password: emailCredentials.pass?.replace(/\s/g, ''), // Remove all spaces from password
+      host: emailCredentials.host || 'imap.gmail.com',
       port: 993,
       tls: true,
       authTimeout: 10000,
@@ -128,11 +143,13 @@ export default async function handler(req, res) {
     },
   };
 
-  if (!imapConfig.imap.user || !imapConfig.imap.password) {
-    sendEvent({ type: 'error', error: 'Missing email credentials. Please configure them in Settings.' });
-    res.end();
-    return;
-  }
+  console.log('✅ Final IMAP Config:', {
+    user: imapConfig.imap.user,
+    host: imapConfig.imap.host,
+    port: imapConfig.imap.port,
+    passwordLength: imapConfig.imap.password?.length,
+    hasPassword: !!imapConfig.imap.password
+  });
 
   let connection;
 

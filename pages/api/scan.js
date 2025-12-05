@@ -63,7 +63,7 @@ async function analyzeEmail(emailSubject, emailBody, resumeText, jobCriteria) {
 
   try {
     const response = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -89,21 +89,33 @@ export default async function handler(req, res) {
 
   const { companyIndustry, jobCriteria, emailCredentials, sendSummaryEmail: shouldSendEmail, managerEmail, emailFilters } = req.body;
 
-  // Use provided credentials or fallback to env vars
+  // Log incoming request details
   console.log('=== EMAIL SCAN REQUEST ===');
-  console.log('Email Credentials:', {
-    user: emailCredentials?.user ? '✓ provided' : '✗ missing',
-    pass: emailCredentials?.pass ? '✓ provided (length: ' + emailCredentials?.pass?.length + ')' : '✗ missing',
-    host: emailCredentials?.host || 'default (imap.gmail.com)'
+  console.log('📧 Received emailCredentials object:', emailCredentials ? 'YES' : 'NO');
+  console.log('📧 emailCredentials:', {
+    exists: !!emailCredentials,
+    user: emailCredentials?.user ? `✓ provided (${emailCredentials.user})` : '✗ missing',
+    pass: emailCredentials?.pass ? `✓ provided (length: ${emailCredentials.pass.length})` : '✗ missing',
+    host: emailCredentials?.host || 'not specified'
   });
   console.log('Email Filters:', emailFilters);
-  console.log('Env IMAP_PASSWORD:', process.env.IMAP_PASSWORD ? '✓ set' : '✗ not set');
+  console.log('Last Scanned UID:', req.body.lastScannedUid);
+
+  // IMPORTANT: Use database credentials ONLY - do NOT fall back to .env
+  // The .env credentials are placeholders and should never be used
+  if (!emailCredentials || !emailCredentials.user || !emailCredentials.pass) {
+    console.error('❌ No valid credentials provided from database!');
+    return res.status(400).json({
+      error: 'Missing email credentials. Please configure your IMAP credentials in Settings or Onboarding.',
+      details: 'Database credentials (imapUser/imapPassword) must be set in your company profile.'
+    });
+  }
 
   const imapConfig = {
     imap: {
-      user: emailCredentials?.user || process.env.IMAP_USER,
-      password: emailCredentials?.pass || process.env.IMAP_PASSWORD,
-      host: emailCredentials?.host || process.env.IMAP_HOST || 'imap.gmail.com',
+      user: emailCredentials.user,
+      password: emailCredentials.pass?.replace(/\s/g, ''), // Remove all spaces from password
+      host: emailCredentials.host || 'imap.gmail.com',
       port: 993,
       tls: true,
       authTimeout: 10000,
@@ -113,16 +125,13 @@ export default async function handler(req, res) {
     },
   };
 
-  console.log('Final IMAP Config:', {
+  console.log('✅ Final IMAP Config:', {
     user: imapConfig.imap.user,
     host: imapConfig.imap.host,
     port: imapConfig.imap.port,
+    passwordLength: imapConfig.imap.password?.length,
     hasPassword: !!imapConfig.imap.password
   });
-
-  if (!imapConfig.imap.user || !imapConfig.imap.password) {
-    return res.status(400).json({ error: 'Missing email credentials. Please configure them in Settings.' });
-  }
 
   try {
     const connection = await imaps.connect(imapConfig);

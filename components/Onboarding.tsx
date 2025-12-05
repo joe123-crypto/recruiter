@@ -32,7 +32,9 @@ export const Onboarding: React.FC<Props> = ({ company, onComplete }) => {
             ...formData,
             onboardingComplete: true,
             // If using login email, ensure imapUser matches email
-            imapUser: useLoginEmail ? formData.email : formData.imapUser
+            imapUser: useLoginEmail ? formData.email : formData.imapUser,
+            // Sanitize IMAP password by removing all spaces
+            imapPassword: formData.imapPassword?.replace(/\s/g, '') || formData.imapPassword
           };
 
           await updateUserProfile(auth.currentUser.uid, updatedProfile);

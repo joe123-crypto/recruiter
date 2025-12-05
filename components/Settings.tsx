@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CompanyProfile } from '../types';
-import { saveProfile } from '../services/storageService';
+import { updateUserProfile } from '../services/userService';
+import { auth } from '../src/lib/firebase';
 import { Building2, MapPin, Mail, Briefcase, Save, Check, ExternalLink } from 'lucide-react';
 
 interface Props {
@@ -11,13 +12,33 @@ interface Props {
 export const Settings: React.FC<Props> = ({ company, onUpdate }) => {
   const [formData, setFormData] = useState<CompanyProfile>(company);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    saveProfile(formData);
-    onUpdate(formData);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setError(null);
+
+    try {
+      if (!auth.currentUser) {
+        setError('Not authenticated. Please sign in again.');
+        return;
+      }
+
+      // Sanitize IMAP password by removing all spaces before saving
+      const sanitizedData = {
+        ...formData,
+        imapPassword: formData.imapPassword?.replace(/\s/g, '') || formData.imapPassword
+      };
+
+      await updateUserProfile(auth.currentUser.uid, sanitizedData);
+      onUpdate(sanitizedData);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      setError('Failed to save settings. Please try again.');
+      setTimeout(() => setError(null), 3000);
+    }
   };
 
   const getAppPasswordLink = (host?: string) => {
@@ -33,6 +54,12 @@ export const Settings: React.FC<Props> = ({ company, onUpdate }) => {
       <div className="max-w-2xl mx-auto w-full">
         <h2 className="text-2xl font-bold text-white mb-6">Agent Configuration</h2>
         <p className="text-slate-400 mb-8">Update your company details and the parameters the AI Agent uses when scanning for candidates.</p>
+
+        {error && (
+          <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Company Profile Panel */}
@@ -151,7 +178,7 @@ export const Settings: React.FC<Props> = ({ company, onUpdate }) => {
                       value={formData.imapPassword || ''}
                       onChange={(e) => setFormData({ ...formData, imapPassword: e.target.value })}
                     />
-                    <p className="text-xs text-slate-500 mt-1">Use an App Password, not your login password.</p>
+                    <p className="text-xs text-slate-500 mt-1">Use an App Password, not your login password. Spaces will be automatically removed.</p>
                   </div>
                 </div>
               </div>
